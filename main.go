@@ -39,9 +39,9 @@ func main() {
 	const filepathroot = "."
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(filepathroot)))))
-	mux.HandleFunc("/healthz", ServeHttp)
-	mux.HandleFunc("/metrics", apiCfg.WriteHits)
-	mux.HandleFunc("/reset", apiCfg.resetHits)
+	mux.HandleFunc("GET /healthz", ServeHttp)
+	mux.HandleFunc("GET /metrics", apiCfg.WriteHits)
+	mux.HandleFunc("POST /reset", apiCfg.resetHits)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
