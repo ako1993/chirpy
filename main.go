@@ -27,8 +27,15 @@ func ServeHttp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) WriteHits(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
 	strVal := strconv.FormatInt(int64(cfg.fileserverhits.Load()), 10)
-	w.Write([]byte(fmt.Sprintf("Hits: %v", strVal)))
+	result := fmt.Sprintf(`<html>
+				<body>
+					<h1>Welcome, Chirpy Admin</h1>
+					<p>Chirpy has been visited %v times!</p>
+				</body>
+				</html>`, strVal)
+	w.Write([]byte(result))
 }
 
 func (cfg *apiConfig) resetHits(w http.ResponseWriter, r *http.Request) {
@@ -39,9 +46,9 @@ func main() {
 	const filepathroot = "."
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(filepathroot)))))
-	mux.HandleFunc("GET /healthz", ServeHttp)
-	mux.HandleFunc("GET /metrics", apiCfg.WriteHits)
-	mux.HandleFunc("POST /reset", apiCfg.resetHits)
+	mux.HandleFunc("GET /api/healthz", ServeHttp)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.WriteHits)
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetHits)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
