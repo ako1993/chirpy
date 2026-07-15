@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 )
 
@@ -75,6 +77,45 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Write(dat)
 }
 
+func cleanUserRequest(w http.ResponseWriter, r *http.Request) {
+	type userInput struct {
+		Body string `json:"body"`
+	}
+	type cleanedResponse struct {
+		Cleaned_body string `json:"cleaned_body"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	userInput_ := userInput{}
+	err := decoder.Decode(&userInput_)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+	body := replaceBadWord(userInput_.Body)
+	response := cleanedResponse{
+		Cleaned_body: body,
+	}
+	if len(userInput_.Body) < 140 {
+		respondWithJSON(w, 200, response)
+	} else {
+		respondWithError(w, 400, "ERROR: message body too long")
+	}
+}
+
+func replaceBadWord(message string) string {
+	bad_words := []string{"kerfuffle", "sharbert", "fornax"}
+	message_parts := strings.Split(message, " ")
+	for i := range message_parts {
+		if slices.Contains(bad_words, strings.ToLower(message_parts[i])) {
+			message_parts[i] = "****"
+		}
+	}
+	message = strings.Join(message_parts, " ")
+
+	return message
+}
+
 func validate_chirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
@@ -106,7 +147,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(filepathroot)))))
 	mux.HandleFunc("GET /api/healthz", ServeHttp)
-	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
+	mux.HandleFunc("POST /api/validate_chirp", cleanUserRequest)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.WriteHits)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHits)
 	server := &http.Server{
