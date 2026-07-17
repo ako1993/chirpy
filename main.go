@@ -1,20 +1,58 @@
 package main
 
 import (
+	"chirpy/internal/database"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverhits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 var apiCfg apiConfig
+
+func main() {
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	dbURL := os.Getenv("DB_URL")
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	apiCfg.dbQueries = database.New(db)
+
+	const filepathroot = "."
+	mux := http.NewServeMux()
+	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(filepathroot)))))
+	mux.HandleFunc("GET /api/healthz", ServeHttp)
+	mux.HandleFunc("POST /api/validate_chirp", cleanUserRequest)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.WriteHits)
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetHits)
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Println(err)
+	}
+}
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -140,21 +178,4 @@ func validate_chirp(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, 200, jsonBody)
 	}
 
-}
-
-func main() {
-	const filepathroot = "."
-	mux := http.NewServeMux()
-	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(filepathroot)))))
-	mux.HandleFunc("GET /api/healthz", ServeHttp)
-	mux.HandleFunc("POST /api/validate_chirp", cleanUserRequest)
-	mux.HandleFunc("GET /admin/metrics", apiCfg.WriteHits)
-	mux.HandleFunc("POST /admin/reset", apiCfg.resetHits)
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
-	}
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		fmt.Println(err)
-	}
 }
