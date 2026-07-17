@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -19,6 +21,14 @@ import (
 type apiConfig struct {
 	fileserverhits atomic.Int32
 	dbQueries      *database.Queries
+	platform       string `env:"PLATFORM"`
+}
+
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 var apiCfg apiConfig
@@ -44,7 +54,8 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", ServeHttp)
 	mux.HandleFunc("POST /api/validate_chirp", cleanUserRequest)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.WriteHits)
-	mux.HandleFunc("POST /admin/reset", apiCfg.resetHits)
+	mux.HandleFunc("POST /admin/reset", clear_users)
+	mux.HandleFunc("POST /api/users", create_user)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
@@ -178,4 +189,41 @@ func validate_chirp(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, 200, jsonBody)
 	}
 
+}
+
+func create_user(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+	new_user, err := apiCfg.dbQueries.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		fmt.Println(err)
+	}
+	new_user_ := User{
+		ID:        new_user.ID,
+		CreatedAt: new_user.CreatedAt,
+		UpdatedAt: new_user.UpdatedAt,
+		Email:     new_user.Email,
+	}
+	respondWithJSON(w, 201, new_user_)
+}
+
+func clear_users(w http.ResponseWriter, r *http.Request) {
+	apiCfg.platform = os.Getenv("PLATFORM")
+	if apiCfg.platform != "dev" {
+		respondWithError(w, 403, "Forbidden")
+	} else {
+		err := apiCfg.dbQueries.ClearAllUsers(r.Context())
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
 }
