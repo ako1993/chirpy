@@ -31,6 +31,14 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type Chirp struct {
+	ID        uuid.UUID     `json:"id"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+	Body      string        `json:"body"`
+	UserID    uuid.NullUUID `json:"user_id"`
+}
+
 var apiCfg apiConfig
 
 func main() {
@@ -56,6 +64,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.WriteHits)
 	mux.HandleFunc("POST /admin/reset", clear_users)
 	mux.HandleFunc("POST /api/users", create_user)
+	mux.HandleFunc("POST /api/chirps", save_chirp)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
@@ -165,9 +174,10 @@ func replaceBadWord(message string) string {
 	return message
 }
 
-func validate_chirp(w http.ResponseWriter, r *http.Request) {
+func save_chirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body string `json:"body"`
+		Body    string        `json:"body"`
+		User_id uuid.NullUUID `json:"user_id"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -180,13 +190,23 @@ func validate_chirp(w http.ResponseWriter, r *http.Request) {
 	if len(params.Body) > 140 {
 		respondWithError(w, 400, "Chirp too long!")
 	} else {
-		type returnJson struct {
-			Is_valid bool `json:"valid"`
+		chirp_params := database.CreateChirpParams{
+			Body:   params.Body,
+			UserID: params.User_id,
 		}
-		jsonBody := returnJson{
-			Is_valid: true,
+
+		new_chirp, err := apiCfg.dbQueries.CreateChirp(r.Context(), chirp_params)
+		if err != nil {
+			fmt.Println(err)
 		}
-		respondWithJSON(w, 200, jsonBody)
+		new_chirp_ := Chirp{
+			ID:        new_chirp.ID,
+			CreatedAt: new_chirp.CreatedAt,
+			UpdatedAt: new_chirp.UpdatedAt,
+			Body:      new_chirp.Body,
+			UserID:    new_chirp.UserID,
+		}
+		respondWithJSON(w, 201, new_chirp_)
 	}
 
 }
