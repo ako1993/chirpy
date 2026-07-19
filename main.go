@@ -66,6 +66,7 @@ func main() {
 	mux.HandleFunc("POST /api/users", create_user)
 	mux.HandleFunc("POST /api/chirps", save_chirp)
 	mux.HandleFunc("GET /api/chirps", get_all_chirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", get_single_chirp)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
@@ -229,6 +230,30 @@ func get_all_chirps(w http.ResponseWriter, r *http.Request) {
 		return_chirps = append(return_chirps, new_chirp)
 	}
 	respondWithJSON(w, 200, return_chirps)
+}
+
+func get_single_chirp(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("chirpID")
+	new_id, err := uuid.Parse(id)
+	if err != nil {
+		fmt.Println(err)
+	}
+	chirp, err := apiCfg.dbQueries.GetChirp(r.Context(), new_id)
+	if err != nil {
+		fmt.Println(err)
+	}
+	if chirp.ID == uuid.Nil {
+		respondWithError(w, 404, "No chirp found")
+	} else {
+		return_chirp := Chirp{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body:      chirp.Body,
+			UserID:    chirp.UserID,
+		}
+		respondWithJSON(w, 200, return_chirp)
+	}
 }
 
 func create_user(w http.ResponseWriter, r *http.Request) {
