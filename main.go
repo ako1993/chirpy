@@ -65,6 +65,7 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", clear_users)
 	mux.HandleFunc("POST /api/users", create_user)
 	mux.HandleFunc("POST /api/chirps", save_chirp)
+	mux.HandleFunc("GET /api/chirps", get_all_chirps)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
@@ -209,6 +210,25 @@ func save_chirp(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, 201, new_chirp_)
 	}
 
+}
+
+func get_all_chirps(w http.ResponseWriter, r *http.Request) {
+	return_chirps := []Chirp{}
+	chirps, err := apiCfg.dbQueries.GetAllChirps(r.Context())
+	if err != nil {
+		fmt.Println(err)
+	}
+	for _, chirp := range chirps {
+		new_chirp := Chirp{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body:      chirp.Body,
+			UserID:    chirp.UserID,
+		}
+		return_chirps = append(return_chirps, new_chirp)
+	}
+	respondWithJSON(w, 200, return_chirps)
 }
 
 func create_user(w http.ResponseWriter, r *http.Request) {
