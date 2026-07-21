@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"chirpy/internal/auth"
+
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -25,10 +27,11 @@ type apiConfig struct {
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+	ID             uuid.UUID `json:"id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	Email          string    `json:"email"`
+	HashedPassword string    `json:"-"`
 }
 
 type Chirp struct {
@@ -67,6 +70,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", save_chirp)
 	mux.HandleFunc("GET /api/chirps", get_all_chirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", get_single_chirp)
+	mux.HandleFunc("POST /api/login", login_user)
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
@@ -258,7 +262,8 @@ func get_single_chirp(w http.ResponseWriter, r *http.Request) {
 
 func create_user(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email string `json:"email"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -268,10 +273,19 @@ func create_user(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		return
 	}
-	new_user, err := apiCfg.dbQueries.CreateUser(r.Context(), params.Email)
+	hashed_pw, err := auth.HashPassword(params.Password)
 	if err != nil {
 		fmt.Println(err)
 	}
+	user_params := database.CreateUserParams{
+		Email:          params.Email,
+		HashedPassword: hashed_pw,
+	}
+	new_user, err := apiCfg.dbQueries.CreateUser(r.Context(), user_params)
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	new_user_ := User{
 		ID:        new_user.ID,
 		CreatedAt: new_user.CreatedAt,
@@ -279,6 +293,44 @@ func create_user(w http.ResponseWriter, r *http.Request) {
 		Email:     new_user.Email,
 	}
 	respondWithJSON(w, 201, new_user_)
+}
+
+func login_user(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+	user_to_match, err := apiCfg.dbQueries.Lookup_user_by_email(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, 401, "Incorrect email or password")
+		fmt.Printf("LOOKUP FAILED:%v", err)
+	}
+	confirm_match, err := auth.CheckPasswordHash(params.Password, user_to_match.HashedPassword)
+	if err != nil {
+		respondWithError(w, 401, "Incorrect email or password")
+		fmt.Printf("MATCH FAILED:%v", err)
+		fmt.Printf("USER PW: %v; HASH: %v", params.Password, user_to_match.HashedPassword)
+	}
+	if confirm_match == true {
+		confirmed_user := User{
+			ID:        user_to_match.ID,
+			CreatedAt: user_to_match.CreatedAt,
+			UpdatedAt: user_to_match.UpdatedAt,
+			Email:     user_to_match.Email,
+		}
+		respondWithJSON(w, 200, confirmed_user)
+	} else {
+		respondWithError(w, 401, "Incorrect email or password")
+	}
+
 }
 
 func clear_users(w http.ResponseWriter, r *http.Request) {
