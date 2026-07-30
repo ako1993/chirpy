@@ -24,6 +24,7 @@ type apiConfig struct {
 	fileserverhits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string `env:"PLATFORM"`
+	token_secret   string `env:"TOKEN_SECRET"`
 }
 
 type User struct {
@@ -32,6 +33,7 @@ type User struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 	Email          string    `json:"email"`
 	HashedPassword string    `json:"-"`
+	Token          string    `json:"token"`
 }
 
 type Chirp struct {
@@ -182,8 +184,7 @@ func replaceBadWord(message string) string {
 
 func save_chirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body    string        `json:"body"`
-		User_id uuid.NullUUID `json:"user_id"`
+		Body string `json:"body"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -193,12 +194,24 @@ func save_chirp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		return
 	}
+	request_token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+	apiCfg.token_secret = os.Getenv("TOKEN_SECRET")
+	validation_id, err := auth.ValidateJWT(request_token, apiCfg.token_secret)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+	user_id := uuid.NullUUID{UUID: validation_id, Valid: true}
 	if len(params.Body) > 140 {
 		respondWithError(w, 400, "Chirp too long!")
 	} else {
 		chirp_params := database.CreateChirpParams{
 			Body:   params.Body,
-			UserID: params.User_id,
+			UserID: user_id,
 		}
 
 		new_chirp, err := apiCfg.dbQueries.CreateChirp(r.Context(), chirp_params)
@@ -297,8 +310,9 @@ func create_user(w http.ResponseWriter, r *http.Request) {
 
 func login_user(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Password string `json:"password"`
-		Email    string `json:"email"`
+		Password           string        `json:"password"`
+		Email              string        `json:"email"`
+		Expires_in_seconds time.Duration `json:"expires_in_seconds"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -320,11 +334,20 @@ func login_user(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("USER PW: %v; HASH: %v", params.Password, user_to_match.HashedPassword)
 	}
 	if confirm_match == true {
+		apiCfg.token_secret = os.Getenv("TOKEN_SECRET")
+		if params.Expires_in_seconds > 60 || params.Expires_in_seconds == 0 {
+			params.Expires_in_seconds = 60 * time.Minute
+		}
+		Token, err := auth.MakeJWT(user_to_match.ID, apiCfg.token_secret, params.Expires_in_seconds)
+		if err != nil {
+			fmt.Printf("Token generation failed: %v", err)
+		}
 		confirmed_user := User{
 			ID:        user_to_match.ID,
 			CreatedAt: user_to_match.CreatedAt,
 			UpdatedAt: user_to_match.UpdatedAt,
 			Email:     user_to_match.Email,
+			Token:     Token,
 		}
 		respondWithJSON(w, 200, confirmed_user)
 	} else {
