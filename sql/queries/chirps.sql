@@ -16,3 +16,7 @@ WHERE id = $1;
 
 -- name: ClearAllChirps :exec
 DELETE FROM chirps;
+
+-- name: DeleteSingleChirp :exec
+DELETE FROM chirps
+WHERE user_id = $1 AND id = $2;

@@ -77,6 +77,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", check_refresh_token)
 	mux.HandleFunc("POST /api/revoke", revoke_refresh_token)
 	mux.HandleFunc("PUT /api/users", authorize_user)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", delete_chirp)
 
 	server := &http.Server{
 		Addr:    ":8080",
@@ -478,4 +479,42 @@ func authorize_user(w http.ResponseWriter, r *http.Request) {
 	}
 	respondWithJSON(w, 200, returned_user)
 
+}
+
+func delete_chirp(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("chirpID")
+	access_token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Could not parse access token")
+		return
+	}
+	apiCfg.token_secret = os.Getenv("TOKEN_SECRET")
+	user_id, err := auth.ValidateJWT(access_token, apiCfg.token_secret)
+	if err != nil {
+		respondWithError(w, 403, "Unauthorized or malformed token")
+		return
+	}
+	new_id, err := uuid.Parse(id)
+	if err != nil {
+		fmt.Printf("Could not parse UUID:%v", err)
+		return
+	}
+	chirp, err := apiCfg.dbQueries.GetChirp(r.Context(), new_id)
+	if err != nil {
+		respondWithError(w, 404, "Chirp not found")
+	}
+	if chirp.UserID.UUID != user_id {
+		respondWithError(w, 403, "Unauthorized")
+		return
+	}
+	delete_params := database.DeleteSingleChirpParams{
+		UserID: uuid.NullUUID{UUID: user_id, Valid: true},
+		ID:     new_id,
+	}
+	err = apiCfg.dbQueries.DeleteSingleChirp(r.Context(), delete_params)
+	if err != nil {
+		respondWithError(w, 404, "Chirp not found")
+		return
+	}
+	respondWithJSON(w, 204, "Chirp deleted!")
 }
