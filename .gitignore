@@ -1,2 +1,4 @@
 .env
 build.txt
+connect_to_db.txt
+migration_command.txt

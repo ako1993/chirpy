@@ -34,6 +34,7 @@ type User struct {
 	Email          string    `json:"email"`
 	HashedPassword string    `json:"-"`
 	Token          string    `json:"token"`
+	Refresh_token  string    `json:"refresh_token"`
 }
 
 type Chirp struct {
@@ -73,6 +74,9 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", get_all_chirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", get_single_chirp)
 	mux.HandleFunc("POST /api/login", login_user)
+	mux.HandleFunc("POST /api/refresh", check_refresh_token)
+	mux.HandleFunc("POST /api/revoke", revoke_refresh_token)
+
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
@@ -310,9 +314,8 @@ func create_user(w http.ResponseWriter, r *http.Request) {
 
 func login_user(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Password           string        `json:"password"`
-		Email              string        `json:"email"`
-		Expires_in_seconds time.Duration `json:"expires_in_seconds"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -335,19 +338,26 @@ func login_user(w http.ResponseWriter, r *http.Request) {
 	}
 	if confirm_match == true {
 		apiCfg.token_secret = os.Getenv("TOKEN_SECRET")
-		if params.Expires_in_seconds > 60 || params.Expires_in_seconds == 0 {
-			params.Expires_in_seconds = 60 * time.Minute
-		}
-		Token, err := auth.MakeJWT(user_to_match.ID, apiCfg.token_secret, params.Expires_in_seconds)
+		Token, err := auth.MakeJWT(user_to_match.ID, apiCfg.token_secret, 60*time.Minute)
 		if err != nil {
 			fmt.Printf("Token generation failed: %v", err)
 		}
+		refresh_token := auth.MakeRefreshToken()
+		refresh_token_params := database.CreateRefreshTokenParams{
+			Token:  refresh_token,
+			UserID: uuid.NullUUID{UUID: user_to_match.ID, Valid: true},
+		}
+		_, err = apiCfg.dbQueries.CreateRefreshToken(r.Context(), refresh_token_params)
+		if err != nil {
+			fmt.Printf("Refresh Token generation failed: %v", err)
+		}
 		confirmed_user := User{
-			ID:        user_to_match.ID,
-			CreatedAt: user_to_match.CreatedAt,
-			UpdatedAt: user_to_match.UpdatedAt,
-			Email:     user_to_match.Email,
-			Token:     Token,
+			ID:            user_to_match.ID,
+			CreatedAt:     user_to_match.CreatedAt,
+			UpdatedAt:     user_to_match.UpdatedAt,
+			Email:         user_to_match.Email,
+			Token:         Token,
+			Refresh_token: refresh_token,
 		}
 		respondWithJSON(w, 200, confirmed_user)
 	} else {
@@ -366,4 +376,50 @@ func clear_users(w http.ResponseWriter, r *http.Request) {
 			fmt.Println(err)
 		}
 	}
+}
+
+func check_refresh_token(w http.ResponseWriter, r *http.Request) {
+	refresh_token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, err.Error())
+		return
+	}
+	user_id, err := apiCfg.dbQueries.GetUserFromRefreshToken(r.Context(), refresh_token)
+	if err != nil {
+		respondWithError(w, 401, err.Error())
+		return
+	}
+
+	if user_id.UUID == uuid.Nil {
+		respondWithError(w, 401, "Token Expired")
+		return
+	} else {
+		apiCfg.token_secret = os.Getenv("TOKEN_SECRET")
+		new_access_token, err := auth.MakeJWT(user_id.UUID, apiCfg.token_secret, time.Hour)
+		if err != nil {
+			respondWithError(w, 401, err.Error())
+			return
+		}
+		type token struct {
+			Token string `json:"token"`
+		}
+		token_ := token{
+			Token: new_access_token,
+		}
+		respondWithJSON(w, 200, token_)
+	}
+}
+
+func revoke_refresh_token(w http.ResponseWriter, r *http.Request) {
+	refresh_token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		fmt.Printf("Error getting refresh token from header:%v", err)
+		return
+	}
+	err = apiCfg.dbQueries.RevokeRefreshRoken(r.Context(), refresh_token)
+	if err != nil {
+		fmt.Printf("Error revoking refresh token:%v", err)
+		return
+	}
+	respondWithJSON(w, 204, "Refresh Token Revoked")
 }
