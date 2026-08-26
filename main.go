@@ -76,6 +76,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", login_user)
 	mux.HandleFunc("POST /api/refresh", check_refresh_token)
 	mux.HandleFunc("POST /api/revoke", revoke_refresh_token)
+	mux.HandleFunc("PUT /api/users", authorize_user)
 
 	server := &http.Server{
 		Addr:    ":8080",
@@ -422,4 +423,59 @@ func revoke_refresh_token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondWithJSON(w, 204, "Refresh Token Revoked")
+}
+
+func authorize_user(w http.ResponseWriter, r *http.Request) {
+	access_token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Token Malformed or missing")
+		return
+	}
+	apiCfg.token_secret = os.Getenv("TOKEN_SECRET")
+	user, err := auth.ValidateJWT(access_token, apiCfg.token_secret)
+	if err != nil {
+		respondWithError(w, 401, "Invalid access token")
+		return
+	}
+
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+	hashed_pw, err := auth.HashPassword(params.Password)
+	if err != nil {
+		fmt.Printf("Failed to hash:%v", err)
+		return
+	}
+	update_params := database.UpdateEmailandPasswordParams{
+		ID:             user,
+		Email:          params.Email,
+		HashedPassword: hashed_pw,
+	}
+	err = apiCfg.dbQueries.UpdateEmailandPassword(r.Context(), update_params)
+	if err != nil {
+		respondWithError(w, 401, "Failed to update email and password")
+		return
+	}
+	user_info, err := apiCfg.dbQueries.Lookup_user_by_email(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, 404, "User not found")
+		return
+	}
+	returned_user := User{
+		ID:        user_info.ID,
+		CreatedAt: user_info.CreatedAt,
+		UpdatedAt: user_info.UpdatedAt,
+		Email:     user_info.Email,
+	}
+	respondWithJSON(w, 200, returned_user)
+
 }
