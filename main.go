@@ -25,6 +25,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	platform       string `env:"PLATFORM"`
 	token_secret   string `env:"TOKEN_SECRET"`
+	polka_key      string `env:"POLKA_KEY"`
 }
 
 type User struct {
@@ -525,13 +526,23 @@ func delete_chirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func update_to_chirpy_red(w http.ResponseWriter, r *http.Request) {
+	polka_key, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Could not parse key")
+		return
+	}
+	apiCfg.polka_key = os.Getenv("POLKA_KEY")
+	if polka_key != apiCfg.polka_key {
+		respondWithError(w, 401, "unauthorized")
+		return
+	}
 	type parameters struct {
 		Event string            `json:"event"`
 		Data  map[string]string `json:"data"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		fmt.Println(err)
 		w.WriteHeader(500)
