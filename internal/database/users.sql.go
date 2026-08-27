@@ -23,7 +23,7 @@ func (q *Queries) ClearAllUsers(ctx context.Context) error {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users(id, created_at, updated_at, email, hashed_password)
 VALUES(gen_random_uuid(), NOW(), NOW(), $1, $2)
-RETURNING id, created_at, updated_at, email, hashed_password
+RETURNING id, created_at, updated_at, email, hashed_password, is_chirpy_red
 `
 
 type CreateUserParams struct {
@@ -40,12 +40,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.Email,
 		&i.HashedPassword,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
 
 const lookup_user_by_email = `-- name: Lookup_user_by_email :one
-SELECT id, created_at, updated_at, email, hashed_password
+SELECT id, created_at, updated_at, email, hashed_password, is_chirpy_red
 FROM users
 WHERE email = $1
 `
@@ -59,6 +60,7 @@ func (q *Queries) Lookup_user_by_email(ctx context.Context, email string) (User,
 		&i.UpdatedAt,
 		&i.Email,
 		&i.HashedPassword,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
@@ -78,5 +80,16 @@ type UpdateEmailandPasswordParams struct {
 
 func (q *Queries) UpdateEmailandPassword(ctx context.Context, arg UpdateEmailandPasswordParams) error {
 	_, err := q.db.ExecContext(ctx, updateEmailandPassword, arg.ID, arg.Email, arg.HashedPassword)
+	return err
+}
+
+const updateUsertoChirpyRed = `-- name: UpdateUsertoChirpyRed :exec
+UPDATE users
+SET is_chirpy_red = True
+WHERE id = $1
+`
+
+func (q *Queries) UpdateUsertoChirpyRed(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, updateUsertoChirpyRed, id)
 	return err
 }

@@ -35,6 +35,7 @@ type User struct {
 	HashedPassword string    `json:"-"`
 	Token          string    `json:"token"`
 	Refresh_token  string    `json:"refresh_token"`
+	Is_chipry_red  bool      `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -78,6 +79,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", revoke_refresh_token)
 	mux.HandleFunc("PUT /api/users", authorize_user)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", delete_chirp)
+	mux.HandleFunc("POST /api/polka/webhooks", update_to_chirpy_red)
 
 	server := &http.Server{
 		Addr:    ":8080",
@@ -306,10 +308,11 @@ func create_user(w http.ResponseWriter, r *http.Request) {
 	}
 
 	new_user_ := User{
-		ID:        new_user.ID,
-		CreatedAt: new_user.CreatedAt,
-		UpdatedAt: new_user.UpdatedAt,
-		Email:     new_user.Email,
+		ID:            new_user.ID,
+		CreatedAt:     new_user.CreatedAt,
+		UpdatedAt:     new_user.UpdatedAt,
+		Email:         new_user.Email,
+		Is_chipry_red: new_user.IsChirpyRed.Bool,
 	}
 	respondWithJSON(w, 201, new_user_)
 }
@@ -360,6 +363,7 @@ func login_user(w http.ResponseWriter, r *http.Request) {
 			Email:         user_to_match.Email,
 			Token:         Token,
 			Refresh_token: refresh_token,
+			Is_chipry_red: user_to_match.IsChirpyRed.Bool,
 		}
 		respondWithJSON(w, 200, confirmed_user)
 	} else {
@@ -472,10 +476,11 @@ func authorize_user(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	returned_user := User{
-		ID:        user_info.ID,
-		CreatedAt: user_info.CreatedAt,
-		UpdatedAt: user_info.UpdatedAt,
-		Email:     user_info.Email,
+		ID:            user_info.ID,
+		CreatedAt:     user_info.CreatedAt,
+		UpdatedAt:     user_info.UpdatedAt,
+		Email:         user_info.Email,
+		Is_chipry_red: user_info.IsChirpyRed.Bool,
 	}
 	respondWithJSON(w, 200, returned_user)
 
@@ -517,4 +522,35 @@ func delete_chirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondWithJSON(w, 204, "Chirp deleted!")
+}
+
+func update_to_chirpy_red(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Event string            `json:"event"`
+		Data  map[string]string `json:"data"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+	if params.Event != "user.upgraded" {
+		respondWithJSON(w, 204, "unknown command")
+		return
+	}
+	user_id := params.Data["user_id"]
+	new_id, err := uuid.Parse(user_id)
+	if err != nil {
+		fmt.Printf("Could not parse UUID:%v", err)
+		return
+	}
+	err = apiCfg.dbQueries.UpdateUsertoChirpyRed(r.Context(), new_id)
+	if err != nil {
+		respondWithError(w, 404, "User not found")
+		return
+	}
+	respondWithJSON(w, 204, "")
 }
