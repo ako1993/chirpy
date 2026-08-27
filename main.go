@@ -240,6 +240,36 @@ func save_chirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func get_all_chirps(w http.ResponseWriter, r *http.Request) {
+	author_id := r.URL.Query().Get("author_id")
+	if author_id != "" {
+		new_id, err := uuid.Parse(author_id)
+		if err != nil {
+			respondWithError(w, 401, "Could not parse UUID from auth id")
+			return
+		}
+		new_id_ := uuid.NullUUID{
+			UUID:  new_id,
+			Valid: true, // must set to true to indicate it's not NULL
+		}
+		return_chirps := []Chirp{}
+		chirps, err := apiCfg.dbQueries.GetAllChirpsByAuthor(r.Context(), new_id_)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		for _, chirp := range chirps {
+			new_chirp := Chirp{
+				ID:        chirp.ID,
+				CreatedAt: chirp.CreatedAt,
+				UpdatedAt: chirp.UpdatedAt,
+				Body:      chirp.Body,
+				UserID:    chirp.UserID,
+			}
+			return_chirps = append(return_chirps, new_chirp)
+		}
+		respondWithJSON(w, 200, return_chirps)
+		return
+	}
 	return_chirps := []Chirp{}
 	chirps, err := apiCfg.dbQueries.GetAllChirps(r.Context())
 	if err != nil {
