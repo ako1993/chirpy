@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -89,6 +90,7 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Println(err)
 	}
+	fmt.Println("Hello, World!")
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -241,6 +243,7 @@ func save_chirp(w http.ResponseWriter, r *http.Request) {
 
 func get_all_chirps(w http.ResponseWriter, r *http.Request) {
 	author_id := r.URL.Query().Get("author_id")
+	sort_ := r.URL.Query().Get("sort")
 	if author_id != "" {
 		new_id, err := uuid.Parse(author_id)
 		if err != nil {
@@ -284,8 +287,16 @@ func get_all_chirps(w http.ResponseWriter, r *http.Request) {
 			UserID:    chirp.UserID,
 		}
 		return_chirps = append(return_chirps, new_chirp)
+
 	}
-	respondWithJSON(w, 200, return_chirps)
+	if sort_ == "desc" {
+		sort.Slice(return_chirps, func(i, j int) bool { return return_chirps[i].CreatedAt.After(return_chirps[j].CreatedAt) })
+		respondWithJSON(w, 200, return_chirps)
+	} else {
+		sort.Slice(return_chirps, func(i, j int) bool { return return_chirps[i].CreatedAt.Before(return_chirps[j].CreatedAt) })
+		respondWithJSON(w, 200, return_chirps)
+	}
+
 }
 
 func get_single_chirp(w http.ResponseWriter, r *http.Request) {
@@ -412,6 +423,10 @@ func clear_users(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			fmt.Println(err)
 		}
+	}
+	err := apiCfg.dbQueries.ClearAllChirps(r.Context())
+	if err != nil {
+		fmt.Println(err)
 	}
 }
 
